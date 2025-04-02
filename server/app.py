@@ -2,6 +2,7 @@
 
 from flask import Flask, request, make_response, jsonify
 from flask_migrate import Migrate
+import json
 
 from models import db, Bakery, BakedGood
 
@@ -23,12 +24,43 @@ def bakeries():
     bakeries = [bakery.to_dict() for bakery in Bakery.query.all()]
     return make_response(  bakeries,   200  )
 
-@app.route('/bakeries/<int:id>')
+@app.route('/bakeries/<int:id>', methods=['GET', 'PATCH'])
 def bakery_by_id(id):
-
     bakery = Bakery.query.filter_by(id=id).first()
-    bakery_serialized = bakery.to_dict()
-    return make_response ( bakery_serialized, 200  )
+
+    if not bakery:
+        return make_response(jsonify({'error': 'Bakery not found'}), 404)
+
+    if request.method == 'GET':
+        return make_response(jsonify(bakery.to_dict()), 200)
+
+    elif request.method == 'PATCH':
+        # Try getting JSON data first
+        data = request.get_json(silent=True)
+        
+        # If JSON is not provided, try getting form data
+        if data is None:
+            data = request.form.to_dict()
+
+        if not data:
+            return make_response(jsonify({'error': 'No data provided'}), 400)
+
+        # Update only provided fields
+        for key, value in data.items():
+            if hasattr(bakery, key):
+                setattr(bakery, key, value)
+
+        db.session.commit()
+        return make_response(jsonify(bakery.to_dict()), 200)
+    
+@app.route('/baked_goods/<int:id>',methods=['DELETE'])
+def delete_baked_good(id):
+    baked_good= BakedGood.query.filter(BakedGood.id==id).first()
+    if baked_good:
+        db.session.delete(baked_good)
+        db.session.commit()
+        return make_response(jsonify({'message':'Baked good record successfully deleted'}),200)
+
 
 @app.route('/baked_goods/by_price')
 def baked_goods_by_price():
@@ -44,6 +76,35 @@ def most_expensive_baked_good():
     most_expensive = BakedGood.query.order_by(BakedGood.price.desc()).limit(1).first()
     most_expensive_serialized = most_expensive.to_dict()
     return make_response( most_expensive_serialized,   200  )
+
+@app.route('/baked_goods',methods=['POST'])
+def create_baked_goods():
+    #Extract request form data
+    name= request.form.get('name')
+    price= request.form.get('price')
+    bakery_id= request.form.get('bakery_id')
+
+    #validate input data
+    if not name or not price:
+        return jsonify({'error':'Name and Price must be included'})
+    try:
+        price= float(price)
+        bakery_id= int(bakery_id)#Ensure bakery id is an integer
+    except ValueError:
+        return jsonify({'error':'Price and be a valid number and bakery id integer'}),400
+    
+    #create a new BakedGood instance
+    new_baked_good= BakedGood(name=name,price=price,bakery_id=bakery_id)
+    db.session.add(new_baked_good)
+    db.session.commit()
+
+    response= make_response(jsonify({
+        "name":new_baked_good.name,
+        "price":new_baked_good.price,
+        "bakery_id":new_baked_good.bakery_id
+    }),201)
+    return response
+
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
